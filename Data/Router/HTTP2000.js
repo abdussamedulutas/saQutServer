@@ -1,10 +1,14 @@
 module.exports = function(router)
 {
     router.filter(filter =>{
-        filter.text("/");
-        filter.text("/ee");
+        filter.regex(/^\//);
     }).request(mvc => {
-        mvc.setControllerPath("./htdocs/firstproject/request.js");
+        var path = mvc.url.pathname;
+        if(path == "/"){
+            path = "/index.html";
+        };
+        mvc.FileStream("/run/media/saqut/Depom/Çalışma Masası/defaultTema"+path);
+        return 0xff
     });
     return router;
 };

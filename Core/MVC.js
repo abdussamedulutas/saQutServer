@@ -114,12 +114,13 @@ MVC.prototype.execute = async function()
     let {request,filter} = this.router.execute(this);
     if(filter != null)
     {
+        let stack = null;
         if(request.constructor.name == "Function")
         {
-            request(this);
+            stack = request(this);
         }else if(request.constructor.name == "AsyncFunction")
         {
-            await request(this);
+            stack = await request(this);
         };
         if(this.getControllerPath() == null)
         {
@@ -127,9 +128,12 @@ MVC.prototype.execute = async function()
         };
         try
         {
-            var realPath = path.resolve(__dirname+"/../",this.getControllerPath())
-            var R = require(realPath);
-            R.init(this);
+            if(stack != 0xff)
+            {
+                var realPath = path.resolve(__dirname+"/../",this.getControllerPath())
+                var R = require(realPath);
+                R.init(this);
+            }
         }
         catch(i)
         {

@@ -1,24 +1,4 @@
-//var {
-//    MVC,
-//    MVCRouter
-//} = require("./Core/MVC");
-//
-//require("http").createServer(request).listen(2000);
-//
-// 
-//var liveRouter = liveImport(require.resolve("./Data/Router/router.js"),function(){
-//    let _router = liveRouter.include()(new MVCRouter());
-//    setImmediate(i=>{
-//        router = _router;
-//    })
-//});
-// let router = liveRouter.include()(new MVCRouter());
-// function request(req,res)
-// {
-//     var http = new MVC(req,res);
-//     http.router = router;
-//     http.execute();
-// };
+const { EventEmitter } = require("events");
 const path = require("path");
 function HttpServer()
 {
@@ -41,22 +21,15 @@ function HttpServer()
         MVCRouter
     } = require("./MVC");
     var server = this;
-    var http = require("http");
-    /**
-     * 
-     * @param {http.IncomingMessage} req 
-     * @param {http.OutgoingMessage} res 
-     */
+    this.sockets = [];
     this.request = function(req,res){
-        if(server.suspended == true)
-        {
-            res.connection.destroy();
-            return;
-        }
         var http = new MVC(req,res);
         http.router = server.router;
         http.execute();
-    };
+        res.on("finish",()=>{
+            server.sockets = server.sockets.filter((socket,index) => index != k);
+        })
+    }
 };
 
 HttpServer.prototype.setPort = function(i){
@@ -81,23 +54,28 @@ HttpServer.prototype.start = function(){
     var {MVCRouter} = require("./MVC");
     let http = require("http")
     this._server = http.createServer(this.request);
-    this._server.setTimeout(this.httpTimeout);
+    this._server.setTimeout(this.httpTimeout,()=>{
+        _cv("Server<HTTP> : Connection timeout");
+    });
+    this._server.maxConnections = Infinity;
     this._server.listen(this.port,this.host);
 
     var realPath = path.resolve(__dirname+"/../",this.routerPath)
     this.liveRouter = liveImport(realPath,()=>{
-        let _router = this.liveRouter.include()(new MVCRouter());
-        process.nextTick(()=>{
-            this.router = _router;
-        })
+        try{
+            let _router = this.liveRouter.include()(new MVCRouter());
+            process.nextTick(()=>{
+                this.router = _router;
+            })
+        }catch(i){}
     });
     this.router = this.liveRouter.include()(new MVCRouter());
 };
 HttpServer.prototype.suspend = function(){
-    this.suspended = true;
+    this._server.maxConnections = -1;
 };
 HttpServer.prototype.resume = function(){
-    this.suspended = false;
+    this._server.maxConnections = Infinity;
 };
 HttpServer.prototype.stop = function(){
     this._server.close();

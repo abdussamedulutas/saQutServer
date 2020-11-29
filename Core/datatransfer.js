@@ -1,5 +1,6 @@
 const mime = require("mime-types");
 const fs = require("fs");
+const {Duplex} = require("stream");
 const path = require("path");
 MVC.prototype.FileStream = function(filepath,options){
 	var mvc = this;
@@ -10,6 +11,10 @@ MVC.prototype.FileStream = function(filepath,options){
 			this.S404();
 			return;
 		};
+		if(!fileinfo.isFile()){
+			this.S404();
+			return;
+		}
 		var mimeType,j = {};
 		if(options.mimetype){
 			mimeType = options.mimetype
@@ -48,18 +53,17 @@ MVC.prototype.FileStream = function(filepath,options){
 			return;
 		}else{
 			var readStream = fs.createReadStream(filepath);
-			var ContentEncoding = optimization.detectBestCompressContent(this.request.headers,mimeType,fileinfo.size)[0];
-			var EncodingEngine = optimization[ContentEncoding];
+			var compressStrategy = new HttpCompressStrategy(this.request.headers,mimeType,fileinfo.size);
 			j["Etag"] = ETag;
 			j["Accept-Ranges"] = "bytes";
-			if(ContentEncoding == "noEngine") j["Content-Length"] = fileinfo.size;
+			if(compressStrategy.strategy[0] == "") j["Content-Length"] = fileinfo.size;
 			if(mimeType) j["Content-Type"] = mimeType;
-			Object.assign(j,optimization.headers);
+			Object.assign(j,Optimizationheaders);
 			if(options.bestClientCache){
 				j["Last-Modified"] = fileinfo.mtime;
 				j["Cache-Control"] = "public, max-age="+(options.bestClientCache.time || 604800)+", immutable";
 			}
-			if(ContentEncoding != "noEngine") j["Content-Encoding"] = EncodingEngine.svname;
+			if(compressStrategy.strategy[0] != "") j["Content-Encoding"] = compressStrategy.strategy[0];
 			if(options.download == null || options.download == true){
 				if(options.filename) j["Content-Disposition"] = "attachment; filename=\""+options.filename+"\"";
 			};
@@ -70,16 +74,14 @@ MVC.prototype.FileStream = function(filepath,options){
 				var fsize = 0;
 				this.response.writeHead(200,j);
 				if(this.Method == "GET" || (this.Method != "HEAD")){
-					if(EncodingEngine.stream == null) h = readStream;
-					else h = readStream.pipe(new EncodingEngine.stream());
-					h && h.on("end",()=>{
-						h;
-						_cv("ftp("+mimeType+")"+(ContentEncoding!="noEngine"?"<"+EncodingEngine.svname+">":"")+" "+(options.filename ? " : "+options.filename : path.basename(filepath)) + " | " +bytesToSize(fileinfo.size)+(ContentEncoding!="noEngine"?"->"+bytesToSize(fsize):""));
+					var stream = compressStrategy.pipe(readStream);
+					stream.on("end",()=>{
+						_cv("ftp("+mimeType+")"+(compressStrategy.strategy[0]!=""?"<"+compressStrategy.strategy[0]+">":"")+" "+(options.filename ? " : "+options.filename : path.basename(filepath)) + " | " +bytesToSize(fileinfo.size)+(compressStrategy.strategy[0]==""?"->"+bytesToSize(fsize):""));
 					});
-					h && h.on("data",(data)=>{
+					stream.on("data",(data)=>{
 						fsize += data.length;
 					});
-					h && h.pipe(this.response);
+					stream.pipe(this.response);
 				}else if(this.Method == "HEAD"){
 					this.end();
 				}
@@ -100,14 +102,13 @@ MVC.prototype.DataStream = function(data,options){
 		};
 	};
 	var mimeType = (options.mimetype) ||  "application/octet-stream";
-	var ContentEncoding = optimization.detectBestCompressContent(this.request.headers,mimeType,data.length)[0];
-	var EncodingEngine = optimization[ContentEncoding];
+	var compressStrategy = new HttpCompressStrategy(this.request.headers,mimeType,fileinfo.size);
 	var j = {};
 	if(options.ETag) j["Etag"] = options.ETag;
 	if(ContentEncoding == "noEngine") j["Content-Length"] = data.length;
 	if(mimeType) j["Content-Type"] = mimeType;
-	Object.assign(j,optimization.headers);
-	if(ContentEncoding != "noEngine") j["Content-Encoding"] = EncodingEngine.svname;
+	Object.assign(j,Optimizationheaders);
+	if(compressStrategy.strategy[0]!="") j["Content-Encoding"] = compressStrategy.strategy[0];
 	if(options.download != null || options.download == true){
 		if(options.filename) j["Content-Disposition"] = "attachment; filename=\""+options.filename+"\"";
 		else j["Content-Disposition"] = "attachment;";
@@ -115,18 +116,24 @@ MVC.prototype.DataStream = function(data,options){
 	if(ContentEncoding == "noEngine") this.response.writeHead(200,j);
 	var h;
 	options.extraHeaders && Object.assign(j,options.extraHeaders);
-	var that = this;
-	_cv(((options && ((options.core&&'<'+options.core+'>') || (options.protocol&&'{'+options.protocol+'}') || "data")) || options.filename)+"("+mimeType+") "+(options.filename||bytesToSize(data.length)));
-	if(EncodingEngine.stream == null) this.response.end(data);
-	else{
-		EncodingEngine.compress(data,(err,data)=>{
-			if(err) throw err;
-			j["Content-Length"] = data.length;
-			that.response.writeHead(200,j);
-			that.response.end(data);
-		});
+	try{
+		var fsize = 0;
+		this.response.writeHead(200,j);
+		if(this.Method == "GET" || (this.Method != "HEAD")){
+			var stream = compressStrategy.getStream(data);
+			stream.on("end",()=>{
+				_cv("data("+mimeType+")"+(compressStrategy.strategy[0]!=""?"<"+compressStrategy.strategy[0]+">":"")+compressStrategy.strategy[0]==""?"->"+bytesToSize(fsize):"");
+			});
+			stream.on("data",(data)=>{
+				fsize += data.length;
+			});
+			stream.pipe(this.response);
+		}else if(this.Method == "HEAD"){
+			this.end();
+		}
+	}catch(i){
+		_cv("FileStream Error:",i.message);
 	};
-	h && h.pipe(this.response);
 };
 MVC.prototype.AjaxResponse = function(data,type,isBeautiy){
 	switch(type && type.toLowerCase()){
@@ -153,38 +160,36 @@ MVC.prototype.AjaxResponse = function(data,type,isBeautiy){
 	};
 };
 
-
 const zlib = require("zlib");
-var optimization = {};
-let _FONT_CR = /^(font)\//;                           //br,gzip,deflate
-let _JSON_XML_CR = /^text\/|application\/(json|xml|pdf|rtf|sql)/; //gzip,br,deflate
-let _SND_IMG_CR = /^(audio|image|video)\//;                //-no-
-optimization.detectBestCompressContent = function(headers,mimetype,size)
+function HttpCompressStrategy(headers,mimetype,size)
 {
-    var list = [];
-    var t = optimization.AutoDetectContent(headers);
+	let _FONT_CR = /^(font)\//;
+	let _JSON_XML_CR = /^text\/|application\/(json|xml|pdf|rtf|sql)/;
+	let _SND_IMG_CR = /^(audio|image|video)\//;
+	var list = [];
+    var t = this.AutoDetectContent(headers);
     if(size && size >= 10e6){
-        list.push("noEngine");
+        list.push("");
     }else if(_FONT_CR.test(mimetype)){
-        if(t.gzip) list.push("GnuZipEngine");
-        if(t.br) list.push("brotliEngine");
-        if(t.deflate) list.push("DeflateEngine");
+        if(t.gzip) list.push("gzip");
+        if(t.br) list.push("br");
+        if(t.deflate) list.push("deflate");
     }else if(_JSON_XML_CR.test(mimetype)){
-        if(t.gzip) list.push("GnuZipEngine");
-        if(t.br) list.push("brotliEngine");
-        if(t.deflate) list.push("DeflateEngine");
+        if(t.gzip) list.push("gzip");
+        if(t.br) list.push("br");
+        if(t.deflate) list.push("deflate");
     }else if(_SND_IMG_CR.test(mimetype)){
-        list.push("noEngine");
+        list.push("");
     }else{
         if(size != null && size < 1e6){
-            if(t.gzip) list.push("GnuZipEngine");
-            if(t.deflate) list.push("DeflateEngine");
+            if(t.gzip) list.push("gzip");
+            if(t.deflate) list.push("deflate");
         }
     }
-    if(list.length == 0) list.push("noEngine");
-    return list;
-};
-optimization.AutoDetectContent = function(headers)
+    if(list.length == 0) list.push("");
+    this.strategy = list;
+}
+HttpCompressStrategy.prototype.AutoDetectContent = function(headers)
 {
     var acceptEncoding = headers["accept-encoding"];
     var supported = {};
@@ -199,77 +204,40 @@ optimization.AutoDetectContent = function(headers)
     };
     return supported;
 };
-optimization.DeflateEngine = function(data,callback){
-    var promise = new HTTPPromise();
-    zlib.deflate(data, (err, buffer) => {
-        if(err){
-            if(HTTP.Verbose) console.trace('optimization.DeflateEngine: Error');
-            return promise.errored(err,"ContentEngine");
-        }
-        callback(buffer,"deflate");
-        promise.successed();
-    });
-    return promise;
-};
-optimization.DeflateEngine.svname = "deflate";
-optimization.DeflateEngine.stream = zlib.createDeflate;
-optimization.DeflateEngine.compress = zlib.deflate;
-/**
- * 
- * @param {Buffer|String} data 
- * @param {Function} callback 
- * @return {void}
- */
-optimization.GnuZipEngine = function(data,callback){
-    var promise = new HTTPPromise();
-    zlib.gzip(data, (err, buffer) => {
-        if(err){
-            if(HTTP.Verbose) console.trace('optimization.GnuZipEngine: Error');
-            return promise.errored(err,"ContentEngine");
-        }
-        callback(buffer,"gzip");
-        promise.successed();
-    });
-    return promise;
-};
-optimization.GnuZipEngine.svname = "gzip";
-optimization.GnuZipEngine.stream = zlib.createGzip;
-optimization.GnuZipEngine.compress = zlib.gzip;
-/**
- * 
- * @param {Buffer|String} data 
- * @param {Function} callback 
- * @return {void}
- */
-optimization.brotliEngine = function(data,callback){
-    var promise = new HTTPPromise();
-    zlib.brotliCompress(data, (err, buffer) => {
-        if(err){
-            if(HTTP.Verbose) console.trace('optimization.brotliEngine: Error');
-            return promise.errored(err,"ContentEngine");
-        }
-        callback(buffer,"brotli");
-        promise.successed();
-    });
-    return promise;
-};
-optimization.brotliEngine.stream = zlib.createBrotliCompress;
-optimization.brotliEngine.svname = "br";
-optimization.brotliEngine.compress = zlib.brotliCompress;
-/**
- * 
- * @param {Buffer|String} data 
- * @param {Function} callback 
- * @return {void}
- */
-optimization.noEngine = function(data,callback){
-    callback(data);
-    return new HTTPPromise({success:true});
-};
-optimization.noEngine.stream = null;
-optimization.noEngine.svname = "";
 
-optimization.headers = {
+HttpCompressStrategy.prototype.pipe = function(stream)
+{
+	var first = this.strategy[0];
+	switch(first)
+	{
+		case "deflate": return stream.pipe(zlib.createDeflate());
+		case "gzip": return stream.pipe(zlib.createGzip());
+		case "br": return stream.pipe(zlib.createBrotliCompress());
+		case "": return stream;
+	}
+}
+HttpCompressStrategy.prototype.getStream = function(content)
+{
+	var result = null;
+	var T = new Duplex({
+		write:function(){
+			return false;
+		},
+		read:function(){
+			return false;
+		}
+	});
+	var first = this.strategy[0];
+	switch(first)
+	{
+		case "deflate": result = T.pipe(zlib.createDeflate()); break;
+		case "gzip": result = T.pipe(zlib.createGzip()); break;
+		case "br": result = T.pipe(zlib.createBrotliCompress()); break;
+	};
+	T.push(content);
+	return result;
+}
+var Optimizationheaders = {
     'Tk':'N',
     'Content-Owner':"saQut Copyright (c)",
     'Software':"Nodeus",
