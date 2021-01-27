@@ -1,0 +1,3 @@
+hy("body").add({
+    $:"input"
+})

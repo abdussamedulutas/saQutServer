@@ -8,10 +8,18 @@ MVC.prototype.FileStream = function(filepath,options){
 	if(!filepath) throw new Error("MVC.prototype.FileStream; should not filepath value is null");
 	fs.stat(filepath,(error,fileinfo)=>{
 		if(error){
+			this.server.emit("warning",{
+				text:"file not found",
+				stace:stackTrace()
+			})
 			this.S404();
 			return;
 		};
 		if(!fileinfo.isFile()){
+			this.server.emit("warning",{
+				text:"cannot send directory",
+				stace:stackTrace()
+			})
 			this.S404();
 			return;
 		}
@@ -33,7 +41,10 @@ MVC.prototype.FileStream = function(filepath,options){
 		{
 			if(mvc.request.headers["if-none-match"] == ETag)
 			{
-				_cv("ftp("+mimeType+") etag: "+(options.filename ? " : "+options.filename : path.basename(filepath)));
+				this.server.emit("verbose",{
+					text:"matched etag " + filepath,
+					stace:stackTrace()
+				})
 				mvc.Send304NotModified();
 				return;
 			}
@@ -42,13 +53,19 @@ MVC.prototype.FileStream = function(filepath,options){
 		{
 			if(mvc.request.headers["if-match"] != ETag)
 			{
-				_cv("ftp("+mimeType+") etag: "+(options.filename ? " : "+options.filename : path.basename(filepath)));
+				this.server.emit("verbose",{
+					text:"matched etag " + filepath,
+					stace:stackTrace()
+				})
 				mvc.Send304NotModified();
 				return
 			}
 		};
 		if(pContent.ControlSet()){
-			var t = pContent.createRangerObj();
+			this.server.emit("verbose",{
+				text:"Sending partial content data",
+				stace:stackTrace()
+			})
 			pContent.SendPart({"Content-Type":mimeType});
 			return;
 		}else{
@@ -69,14 +86,15 @@ MVC.prototype.FileStream = function(filepath,options){
 			};
 			options.extraHeaders && Object.assign(j,options.extraHeaders);
 			try{
-				var h;
-				var that = this;
 				var fsize = 0;
 				this.response.writeHead(200,j);
 				if(this.Method == "GET" || (this.Method != "HEAD")){
 					var stream = compressStrategy.pipe(readStream);
 					stream.on("end",()=>{
-						_cv("ftp("+mimeType+")"+(compressStrategy.strategy[0]!=""?"<"+compressStrategy.strategy[0]+">":"")+" "+(options.filename ? " : "+options.filename : path.basename(filepath)) + " | " +bytesToSize(fileinfo.size)+(compressStrategy.strategy[0]==""?"->"+bytesToSize(fsize):""));
+						this.server.emit("verbose",{
+							text:"ftp("+mimeType+")"+(compressStrategy.strategy[0]!=""?"<"+compressStrategy.strategy[0]+">":"")+" "+(options.filename ? " : "+options.filename : path.basename(filepath)) + " | " +bytesToSize(fileinfo.size)+(compressStrategy.strategy[0]==""?"->"+bytesToSize(fsize):""),
+							stace:stackTrace()
+						})
 					});
 					stream.on("data",(data)=>{
 						fsize += data.length;
@@ -86,7 +104,10 @@ MVC.prototype.FileStream = function(filepath,options){
 					this.end();
 				}
 			}catch(i){
-				_cv("FileStream Error:",i.message);
+				this.server.emit("verbose",{
+					text:"FileStream Error: " + i.message,
+					stace:stackTrace()
+				})
 			};
 		}
 	});
@@ -122,7 +143,10 @@ MVC.prototype.DataStream = function(data,options){
 		if(this.Method == "GET" || (this.Method != "HEAD")){
 			var stream = compressStrategy.getStream(data);
 			stream.on("end",()=>{
-				_cv("data("+mimeType+")"+(compressStrategy.strategy[0]!=""?"<"+compressStrategy.strategy[0]+">":"")+compressStrategy.strategy[0]==""?"->"+bytesToSize(fsize):"");
+				this.server.emit("verbose",{
+					text:"data("+mimeType+")"+(compressStrategy.strategy[0]!=""?"<"+compressStrategy.strategy[0]+">":"")+compressStrategy.strategy[0]==""?"->"+bytesToSize(fsize):"",
+					stace:stackTrace()
+				})
 			});
 			stream.on("data",(data)=>{
 				fsize += data.length;
@@ -132,7 +156,10 @@ MVC.prototype.DataStream = function(data,options){
 			this.end();
 		}
 	}catch(i){
-		_cv("FileStream Error:",i.message);
+		this.server.emit("error",{
+			text:"Cannot response: "+i.message,
+			stace:stackTrace()
+		})
 	};
 };
 MVC.prototype.AjaxResponse = function(data,type,isBeautiy){
@@ -242,7 +269,7 @@ var Optimizationheaders = {
     'Content-Owner':"saQut Copyright (c)",
     'Software':"Nodeus",
     "Server": "Sihheranime/148.10.0 nodejs/11.15.0 (Linux/manjaro) PHP/7.2.3 Perl/v5.16.3",
-    "X-Powered-By": "NodeJS/Sihheranime",
+    "X-Powered-By": "NodeJS/Sihherainyme",
     "Access-Control-Allow-Origin":"*",
     "Access-Control-Allow-Headers":"Origin, X-Requested-With, Content-Type, Accept",
     "Access-Control-Allow-Methods":"GET,HEAD,POST",

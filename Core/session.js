@@ -19,7 +19,12 @@ function SaveSession(path,data)
     return new Promise(function(ok){
         let buf = /*JSON.stringify(data);*/v8.serialize(data);
         return fs.writeFileSync(path,buf,"utf8",err=>{
-            if(err) _cv(err.message);
+            if(err){
+                this.emit("error",{
+                    text:"Save session "+err.message,
+                    stace:stackTrace()
+                })
+            }
             ok();
         });
     })
@@ -102,9 +107,12 @@ function Session()
         this.CookieControl.remove(this.CookieName);
         this.CookieControl.flush();
         this.SessionFilePath = this.TempFilePath + this.CookieKey + ".nses";
-        fs.unlink(this.SessionFilePath,function(err){
+        fs.unlink(this.SessionFilePath,err =>{
             if(err) return;
-            _cv("Session.js","old nses cleaned",this.CookieKey)
+            this.emit("error",{
+                text:"old nses cleaned",
+                stace:stackTrace()
+            })
         })
     };
 };

@@ -5,6 +5,8 @@ global.MVC = MVC;
 const path = require("path");
 global.ixir = require("./ixir");
 global.crypto = require("./crypto");
+const {inherits} = require("util");
+const {EventEmitter} = require("events");
 global._cv = _cv;
 global.bytesToSize = function(bytes) {
    if(bytes == 0) return "0 bytes";
@@ -16,15 +18,16 @@ global.bytesToSize = function(bytes) {
 
 global.liveImport = function(path,change){
     let args_ = require(path);
-    _cv("Live import stated watching",path);
     fs.watch(path,{},(event)=>{
-        _cv("Live import updating module",path);
         change&&change();
         delete require.cache[require.resolve(path)];
         try{
             args_ = require(path);
         }catch(i){
-            _cv("Live import error module",path);
+            this.emit("error",{
+                text:"live import error "+filepath,
+                stace:stackTrace()
+            })
         }
     })
     return {
@@ -59,6 +62,7 @@ function _cv()
  */
 function MVC(request,response)
 {
+    this.server = null;
     this.response = response;
     this.request = request;
     this.method = request.method;
@@ -81,6 +85,7 @@ function MVC(request,response)
      */
     this.router = null;
 }
+inherits(MVC,EventEmitter)
 require("./statusCodes");
 require("./datatransfer");
 require("./cookie");

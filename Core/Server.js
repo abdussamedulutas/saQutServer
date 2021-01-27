@@ -1,4 +1,6 @@
 const { EventEmitter } = require("events");
+const { inherits } = require("util");
+require("./utils");
 const path = require("path");
 function HttpServer()
 {
@@ -23,7 +25,9 @@ function HttpServer()
     var server = this;
     this.sockets = [];
     this.request = function(req,res){
+        server.emit("request",req,res);
         var http = new MVC(req,res);
+        http.server = server;
         http.router = server.router;
         http.execute();
         res.on("finish",()=>{
@@ -31,6 +35,7 @@ function HttpServer()
         })
     }
 };
+inherits(HttpServer,EventEmitter);
 
 HttpServer.prototype.setPort = function(i){
     this.port = i;
@@ -55,10 +60,18 @@ HttpServer.prototype.start = function(){
     let http = require("http")
     this._server = http.createServer(this.request);
     this._server.setTimeout(this.httpTimeout,()=>{
-        _cv("Server<HTTP> : Connection timeout");
+        this.emit("warning",{
+            text:"Connection timeout",
+            stace:stackTrace()
+        })
     });
     this._server.maxConnections = Infinity;
-    this._server.listen(this.port,this.host);
+    this._server.listen(this.port,this.host,()=>{
+        this.emit("verbose",{
+            text:"Port is listenning " + this.port,
+            stace:stackTrace()
+        })
+    });
 
     var realPath = path.resolve(__dirname+"/../",this.routerPath)
     this.liveRouter = liveImport(realPath,()=>{
@@ -67,19 +80,36 @@ HttpServer.prototype.start = function(){
             process.nextTick(()=>{
                 this.router = _router;
             })
-        }catch(i){}
+        }catch(i){
+            this.emit("error",{
+                text:this.routerPath+" cannot reapplied",
+                stace:stackTrace()
+            })
+        }
     });
     this.router = this.liveRouter.include()(new MVCRouter());
 };
 HttpServer.prototype.suspend = function(){
     this._server.maxConnections = -1;
+    this.emit("warning",{
+        text:"Port is suspended, port is "+this.port,
+        stace:stackTrace()
+    })
 };
 HttpServer.prototype.resume = function(){
     this._server.maxConnections = Infinity;
+    this.emit("verbose",{
+        text:"Port is resumed, port is "+this.port,
+        stace:stackTrace()
+    })
 };
 HttpServer.prototype.stop = function(){
     this._server.close();
     this.liveRouter.close();
+    this.emit("verbose",{
+        text:"Port is stopped, port is "+this.port,
+        stace:stackTrace()
+    })
 };
 
 

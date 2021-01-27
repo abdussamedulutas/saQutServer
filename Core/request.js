@@ -6,6 +6,10 @@ MVC.prototype.checkMultipartData = function()
     {
         if(/^multipart[\/]form-data;/.test(this.request.headers["content-type"]))
         {
+            this.emit("verbose",{
+                text:"Multipart request detected",
+                stace:stackTrace()
+            })
             return true
         }
     }
@@ -17,6 +21,10 @@ MVC.prototype.checkUrlEncoded = function()
     {
         if(/application\/x-www-form-urlencoded;?/.test(this.request.headers["content-type"]))
         {
+            this.emit("verbose",{
+                text:"x-www-form-urlencoded request detected",
+                stace:stackTrace()
+            })
             return true
         }
     }
@@ -33,6 +41,10 @@ MVC.prototype.ResolveUrlEncoded = async function()
     });
     var data = Buffer.concat(buffer).toString();
     this.postData = querystring.parse(data);
+    this.emit("verbose",{
+        text:"x-www-form-urlencoded request decoded",
+        stace:stackTrace()
+    })
 };
 MVC.prototype.ResolveMultiPartFormData = async function()
 {
@@ -47,6 +59,10 @@ MVC.prototype.ResolveMultiPartFormData = async function()
             {
                 this.postData = fields;
                 this.filesData = files;
+                this.emit("verbose",{
+                    text:"multipart request parsed",
+                    stace:stackTrace()
+                })
             }
             ok();
         });
